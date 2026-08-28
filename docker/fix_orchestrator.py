@@ -5,7 +5,7 @@ CodeMender CI/CD Fix Orchestrator
 This orchestrator executes inside a Google Cloud Run Job. It:
 1. Parses Wiz finding details from GitHub issue context.
 2. Clones the target GitHub repository into an isolated workspace.
-3. Invokes the CodeMender engine (via `cm fix` CLI or Vertex AI Gemini 3.5 Flash harness).
+3. Invokes the CodeMender engine (via `cm fix` CLI, Vertex AI Gemini model, or built-in security rules).
 4. Runs verification test suites to ensure zero regressions.
 5. Commits the remediated code to a dedicated branch.
 6. Pushes the branch and opens a GitHub Pull Request with detailed explanation.
@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 import urllib.request
 import urllib.error
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 # --- Configuration & Environment ---
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
@@ -31,8 +31,8 @@ ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "").strip()
 ISSUE_BODY = os.environ.get("ISSUE_BODY", "").strip()
 COMMENT_BODY = os.environ.get("COMMENT_BODY", "").strip()
 TARGET_BRANCH = os.environ.get("TARGET_BRANCH", "main").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash").strip()
-PROJECT_ID = os.environ.get("PROJECT_ID", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
+PROJECT_ID = os.environ.get("PROJECT_ID", "att-wiz-cm-ci-cd").strip()
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1").strip()
 
 
@@ -51,36 +51,51 @@ def parse_wiz_finding(title: str, body: str) -> Dict[str, Any]:
         "line_number": None,
         "cve": None,
         "description": "",
-        "remediation_advice": "",
         "raw_body": body
     }
 
+    combined_text = f"{title}\n{body}"
+
     # Extract File Path
-    file_match = re.search(r"(?:File|Path|Target|Location):\s*`?([a-zA-Z0-9_\-./\\]+)`?", body, re.IGNORECASE)
-    if file_match:
-        finding["file_path"] = file_match.group(1).strip()
+    file_patterns = [
+        r"(?:File|Path|Target|Location|File Path)\s*[:=\*]*\s*[`\"']?([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)[`\"']?",
+        r"(?:in|file)\s+[`\"']?([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)[`\"']?",
+        r"`([a-zA-Z0-9_\-./\\]+\.(?:py|js|ts|go|java|c|cpp|rs|html|php|rb|sql|sh))`",
+    ]
+    for pattern in file_patterns:
+        match = re.search(pattern, body, re.IGNORECASE)
+        if match:
+            finding["file_path"] = match.group(1).strip()
+            break
+
+    if not finding["file_path"]:
+        for pattern in file_patterns:
+            match = re.search(pattern, title, re.IGNORECASE)
+            if match:
+                finding["file_path"] = match.group(1).strip()
+                break
 
     # Extract Line Number
-    line_match = re.search(r"(?:Line|Line Number|Lines):\s*(\d+)", body, re.IGNORECASE)
+    line_match = re.search(r"(?:Line|Line Number|Lines):\s*(\d+)", combined_text, re.IGNORECASE)
     if line_match:
         finding["line_number"] = int(line_match.group(1))
 
     # Extract CVE / CWE / Vulnerability Identifier
-    cve_match = re.search(r"\b(CVE-\d{4}-\d+|CWE-\d+|WIZ-SEC-\d+)\b", f"{title} {body}", re.IGNORECASE)
+    cve_match = re.search(r"\b(CVE-\d{4}-\d+|CWE-\d+|WIZ-SEC-\d+)\b", combined_text, re.IGNORECASE)
     if cve_match:
         finding["cve"] = cve_match.group(1).upper()
 
     # Extract Vulnerability Type from Title or Body
-    vuln_match = re.search(r"(?:Vulnerability|Finding|Issue Type|Rule):\s*([^\n\r]+)", body, re.IGNORECASE)
+    vuln_match = re.search(r"(?:Vulnerability|Finding|Issue Type|Rule):\s*([^\n\r]+)", combined_text, re.IGNORECASE)
     if vuln_match:
         finding["vulnerability_type"] = vuln_match.group(1).strip()
-    elif "sql injection" in title.lower() or "sql injection" in body.lower():
+    elif "sql injection" in combined_text.lower():
         finding["vulnerability_type"] = "SQL Injection (CWE-89)"
-    elif "command injection" in title.lower() or "command injection" in body.lower():
+    elif "command injection" in combined_text.lower():
         finding["vulnerability_type"] = "Command Injection (CWE-78)"
-    elif "path traversal" in title.lower() or "directory traversal" in body.lower():
+    elif "path traversal" in combined_text.lower() or "directory traversal" in combined_text.lower():
         finding["vulnerability_type"] = "Path Traversal (CWE-22)"
-    elif "xss" in title.lower() or "cross-site scripting" in body.lower():
+    elif "xss" in combined_text.lower() or "cross-site scripting" in combined_text.lower():
         finding["vulnerability_type"] = "Cross-Site Scripting (CWE-79)"
     else:
         finding["vulnerability_type"] = title.split(":")[-1].strip() if ":" in title else title
@@ -125,11 +140,11 @@ def run_command(cmd: list, cwd: Optional[str] = None, check: bool = True) -> sub
 def apply_codemender_fix(workspace_dir: str, finding: Dict[str, Any]) -> bool:
     """
     Invokes CodeMender logic to remediate the vulnerability.
-    Uses `cm fix` if installed, or the Vertex AI Gemini 3.5 Flash security engine.
+    Uses `cm fix` if installed, or the Vertex AI Gemini model with rule engine fallback.
     """
     log("Invoking CodeMender Fix Engine...")
 
-    # Check if `cm` binary is present in path
+    # 1. Check if `cm` binary is present in path
     cm_binary = shutil.which("cm") or shutil.which("codemender")
     if cm_binary:
         log(f"Found CodeMender CLI binary: {cm_binary}")
@@ -141,50 +156,48 @@ def apply_codemender_fix(workspace_dir: str, finding: Dict[str, Any]) -> bool:
         if finding["file_path"]:
             cmd.extend(["--target", finding["file_path"]])
         res = run_command(cmd, cwd=workspace_dir, check=False)
-        return res.returncode == 0
+        if res.returncode == 0:
+            return True
 
-    # Fallback to direct Gemini 3.5 Flash Agentic Security Remediation Harness
-    log("Running CodeMender Vertex AI Agentic Fixer...")
-    return run_gemini_fix_harness(workspace_dir, finding)
-
-
-def run_gemini_fix_harness(workspace_dir: str, finding: Dict[str, Any]) -> bool:
-    """
-    Agentic remediation harness using Gemini models on Vertex AI / Google Cloud.
-    Analyzes target files, generates surgical remediation patches, and writes updates.
-    """
+    # 2. Locate target file in repository
     target_file = finding["file_path"]
     full_target_path = None
 
     if target_file:
         candidate_path = os.path.join(workspace_dir, target_file)
-        if os.path.exists(candidate_path):
+        if os.path.exists(candidate_path) and os.path.isfile(candidate_path):
             full_target_path = candidate_path
+        else:
+            base_name = os.path.basename(target_file)
+            for root, dirs, files in os.walk(workspace_dir):
+                dirs[:] = [d for d in dirs if d not in [".git", ".github", "docker", "venv", ".venv", "__pycache__"]]
+                if base_name in files:
+                    full_target_path = os.path.join(root, base_name)
+                    break
 
     if not full_target_path:
-        # Search for likely files matching the repository
-        for root, _, files in os.walk(workspace_dir):
-            if ".git" in root:
+        for root, dirs, files in os.walk(workspace_dir):
+            dirs[:] = [d for d in dirs if d not in [".git", ".github", "docker", "venv", ".venv", "__pycache__", "terraform", "docs"]]:
                 continue
             for f in files:
-                if f.endswith((".py", ".js", ".ts", ".go", ".java", ".c", ".cpp", ".rs")):
-                    # Search if file contains indicators
+                if f.endswith((".py", ".js", ".ts", ".go", ".java")):
                     full_target_path = os.path.join(root, f)
                     break
             if full_target_path:
                 break
 
     if not full_target_path or not os.path.exists(full_target_path):
-        log(f"Could not locate target file: {target_file}")
+        log(f"Could not locate target file for finding: {target_file}")
         return False
 
     rel_path = os.path.relpath(full_target_path, workspace_dir)
-    log(f"Analyzing file: {rel_path}")
+    log(f"Targeting file for remediation: {rel_path}")
 
     with open(full_target_path, "r", encoding="utf-8", errors="replace") as f:
         file_content = f.read()
 
-    # Formulate CodeMender prompt
+    # 3. Attempt Gemini on Vertex AI
+    patched_code = None
     prompt = f"""You are Google CodeMender, an expert automated security engineer specializing in vulnerability remediation.
 
 A security finding from Wiz scanner was reported:
@@ -206,88 +219,113 @@ Instructions:
 3. Return ONLY the complete updated file content within a single ``` markdown block. Do not include extra conversational text.
 """
 
-    # Check if google-genai / vertexai is available
     try:
         from google import genai
-        client = genai.Client(vertexai=True, project=PROJECT_ID, location=GCP_REGION)
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-        )
-        response_text = response.text
+        for model_candidate in [GEMINI_MODEL, "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]:
+            try:
+                log(f"Attempting Vertex AI generation with model: {model_candidate}...")
+                client = genai.Client(vertexai=True, project=PROJECT_ID, location=GCP_REGION)
+                response = client.models.generate_content(
+                    model=model_candidate,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    response_text = response.text
+                    code_match = re.search(r"```(?:\w+)?\n(.*?)```", response_text, re.DOTALL)
+                    patched_code = code_match.group(1) if code_match else response_text.strip()
+                    log(f"Successfully generated patch with {model_candidate}")
+                    break
+            except Exception as model_err:
+                log(f"Model {model_candidate} not available: {model_err}")
     except Exception as e:
-        log(f"Vertex AI Client error: {e}. Attempting standard HTTP Vertex AI endpoint...")
-        response_text = call_vertex_api_rest(prompt)
+        log(f"Vertex AI Client initialization notice: {e}")
 
-    if not response_text:
-        log("No response received from Gemini model.")
+    # 4. Built-in CodeMender Security Rule Engine
+    if not patched_code:
+        log("Invoking CodeMender Built-in Security Rule Engine...")
+        patched_code = apply_rule_engine_fix(file_content, finding)
+
+    if not patched_code:
+        log("Unable to generate valid patch via Vertex AI or Rule Engine.")
         return False
 
-    # Extract patched code
-    code_match = re.search(r"```(?:\w+)?\n(.*?)```", response_text, re.DOTALL)
-    if code_match:
-        patched_code = code_match.group(1)
-    else:
-        patched_code = response_text.strip()
-
-    # Write patched file
     with open(full_target_path, "w", encoding="utf-8") as f:
         f.write(patched_code)
 
-    log(f"Successfully applied CodeMender patch to {rel_path}")
+    log(f"Successfully wrote remediation patch to {rel_path}")
     return True
 
 
-def call_vertex_api_rest(prompt: str) -> str:
-    """Invokes Vertex AI Prediction REST API using application default credentials."""
-    try:
-        # Get access token from metadata server
-        req = urllib.request.Request(
-            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-            headers={"Metadata-Flavor": "Google"}
-        )
-        with urllib.request.urlopen(req) as resp:
-            token_data = json.loads(resp.read().decode("utf-8"))
-            access_token = token_data.get("access_token")
+def apply_rule_engine_fix(content: str, finding: Dict[str, Any]) -> Optional[str]:
+    """
+    Built-in CodeMender deterministic remediation rule engine.
+    Applies security patches for common vulnerability patterns (SQLi, Command Injection, etc.).
+    """
+    vuln_type = finding.get("vulnerability_type", "").lower()
 
-        url = f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{GCP_REGION}/publishers/google/models/{GEMINI_MODEL}:generateContent"
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192}
-        }
+    # Rule 1: SQL Injection (CWE-89) in Python/SQLite/Flask
+    if "sql" in vuln_type or "injection" in vuln_type:
+        # Pattern A: f-string query with variable interpolation: query = f"SELECT ... WHERE username = '{username}'"
+        pattern_a = r'query\s*=\s*f["\'](.*?)WHERE\s+([a-zA-Z0-9_]+)\s*=\s*[\'"]?\{([a-zA-Z0-9_]+)\}[\'"]?["\']\s*\n\s*cursor\.execute\(query\)'
+        if re.search(pattern_a, content):
+            def repl_a(m):
+                select_clause = m.group(1)
+                column = m.group(2)
+                var_name = m.group(3)
+                return f'# REMEDIATION: Parameterized query prevents SQL injection (CWE-89)\n    query = "{select_clause}WHERE {column} = ?"\n    cursor.execute(query, ({var_name},))'
+            fixed_content = re.sub(pattern_a, repl_a, content)
+            if fixed_content != content:
+                log("Rule Engine applied parameterized query fix (Pattern A).")
+                return fixed_content
 
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json"
-            },
-            method="POST"
-        )
-        with urllib.request.urlopen(req) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            candidates = result.get("candidates", [])
-            if candidates:
-                return candidates[0]["content"]["parts"][0]["text"]
-    except Exception as ex:
-        log(f"Direct REST API error: {ex}")
-    return ""
+        # Pattern B: Direct execute with f-string: cursor.execute(f"SELECT ... WHERE username = '{username}'")
+        pattern_b = r'cursor\.execute\(f["\'](.*?)WHERE\s+([a-zA-Z0-9_]+)\s*=\s*[\'"]?\{([a-zA-Z0-9_]+)\}[\'"]?["\']\)'
+        if re.search(pattern_b, content):
+            def repl_b(m):
+                select_clause = m.group(1)
+                column = m.group(2)
+                var_name = m.group(3)
+                return f'# REMEDIATION: Parameterized query prevents SQL injection (CWE-89)\n    cursor.execute("{select_clause}WHERE {column} = ?", ({var_name},))'
+            fixed_content = re.sub(pattern_b, repl_b, content)
+            if fixed_content != content:
+                log("Rule Engine applied parameterized query fix (Pattern B).")
+                return fixed_content
+
+    # Rule 2: Command Injection (CWE-78) - subprocess with shell=True
+    if "command" in vuln_type or "cwe-78" in vuln_type:
+        fixed_content = re.sub(r'shell\s*=\s*True', 'shell=False', content)
+        if fixed_content != content:
+            log("Rule Engine applied safe subprocess execution fix.")
+            return fixed_content
+
+    return None
 
 
 def run_verification_tests(workspace_dir: str) -> bool:
-    """Executes existing test suites (e.g. pytest, npm test) if present."""
-    log("Running verification tests in workspace...")
-    if os.path.exists(os.path.join(workspace_dir, "pytest.ini")) or os.path.exists(os.path.join(workspace_dir, "tests")):
-        res = run_command(["pytest"], cwd=workspace_dir, check=False)
+    """Executes pytest suite if test files exist in repository."""
+    log("Running verification test suite...")
+    test_dirs = []
+    for root, dirs, files in os.walk(workspace_dir):
+        if ".git" in root or "docker" in root:
+            continue
+        if any(f.startswith("test_") or f.endswith("_test.py") for f in files):
+            test_dirs.append(root)
+
+    if not test_dirs:
+        log("No unit test files found in workspace.")
+        return True
+
+    all_passed = True
+    for test_dir in test_dirs:
+        log(f"Executing pytest in: {test_dir}")
+        res = subprocess.run(["pytest", "-v"], cwd=test_dir, text=True, capture_output=True)
         if res.returncode == 0:
-            log("Unit test suite PASSED.")
-            return True
+            log(f"Pytest passed in {test_dir}:\n{res.stdout}")
         else:
-            log(f"Unit tests failed:\n{res.stdout}\n{res.stderr}")
-            return False
-    log("No unit test suite detected, proceeding.")
-    return True
+            log(f"Pytest failed in {test_dir}:\n{res.stdout}\n{res.stderr}")
+            all_passed = False
+
+    return all_passed
 
 
 def main():
@@ -302,15 +340,14 @@ def main():
         sys.exit(1)
 
     global ISSUE_TITLE, ISSUE_BODY
-    if not ISSUE_TITLE or not ISSUE_BODY:
-        log(f"Fetching issue #{ISSUE_NUMBER} details from GitHub API...")
-        try:
-            issue_data = github_api_request(f"repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}")
-            ISSUE_TITLE = ISSUE_TITLE or issue_data.get("title", "")
-            ISSUE_BODY = ISSUE_BODY or issue_data.get("body", "")
-            log(f"Fetched Issue Title: {ISSUE_TITLE}")
-        except Exception as e:
-            log(f"Warning: Could not fetch issue details from GitHub API: {e}")
+    log(f"Fetching issue #{ISSUE_NUMBER} details from GitHub API...")
+    try:
+        issue_data = github_api_request(f"repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}")
+        ISSUE_TITLE = issue_data.get("title", "")
+        ISSUE_BODY = issue_data.get("body", "")
+        log(f"Fetched Issue Title: {ISSUE_TITLE}")
+    except Exception as e:
+        log(f"Warning: Could not fetch issue details from GitHub API: {e}")
 
     # 1. Parse Wiz Finding
     finding = parse_wiz_finding(ISSUE_TITLE, ISSUE_BODY)
@@ -343,7 +380,7 @@ def main():
 
         # 5. Verify Patch (Run Tests)
         tests_passed = run_verification_tests(workspace_dir)
-        test_status_note = "✅ Verification tests passed successfully." if tests_passed else "⚠️ Tests were not run or require manual review."
+        test_status_note = "✅ Verification tests passed successfully." if tests_passed else "⚠️ Tests require manual review."
 
         # 6. Check for Git Diff
         diff_res = run_command(["git", "status", "--porcelain"], cwd=workspace_dir)
@@ -357,7 +394,7 @@ def main():
             sys.exit(0)
 
         # 7. Commit Changes
-        commit_msg = f"fix(security): resolve {finding['vulnerability_type']} for issue #{ISSUE_NUMBER}\n\nAutomated fix generated by Google CodeMender ({GEMINI_MODEL})."
+        commit_msg = f"fix(security): resolve {finding['vulnerability_type']} for issue #{ISSUE_NUMBER}\n\nAutomated fix generated by Google CodeMender."
         run_command(["git", "add", "."], cwd=workspace_dir)
         run_command(["git", "commit", "-m", commit_msg], cwd=workspace_dir)
 
@@ -375,7 +412,6 @@ This Pull Request resolves the security finding reported in #{ISSUE_NUMBER}.
 * **Vulnerability Type**: {finding['vulnerability_type']}
 * **Target File**: `{finding['file_path'] or 'Multiple files'}`
 * **Identifier**: `{finding['cve'] or 'N/A'}`
-* **Remediation Model**: `{GEMINI_MODEL}`
 
 #### Validation
 {test_status_note}
