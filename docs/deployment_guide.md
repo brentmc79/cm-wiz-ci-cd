@@ -23,6 +23,7 @@ Follow this guide to deploy the Google Cloud infrastructure and integrate CodeMe
    * `create_cloud_nat`: `true` to provision Cloud NAT for internet egress, or `false` if using an existing proxy.
    * `enable_internal_load_balancer`: `true` if invoking via private Azure-to-GCP Interconnect.
    * `enable_vpc_sc`: `true` if enabling VPC Service Controls perimeter.
+   * `enable_gcp_runner`: `true` if you want Terraform to provision a private GCP Compute Engine VM self-hosting the GitHub Actions runner (see [GCP Self-Hosted Runner Guide](gcp_self_hosted_runner.md)).
 
 4. Initialize and apply the Terraform plan:
    ```bash

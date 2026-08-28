@@ -11,7 +11,7 @@ This repository contains an enterprise reference implementation for integrating 
 ## 🎯 Solution Highlights
 
 * **Automated Remediation on Mention**: Developers and security engineers can trigger automated remediation simply by commenting `@codemender` on any Wiz finding GitHub issue.
-* **Azure-Hosted Runner Support**: Seamless integration for GitHub runners self-hosted in Azure, authenticating passwordless to Google Cloud using **Workload Identity Federation (WIF)**.
+* **Flexible Self-Hosted Runner Support**: Supports GitHub Actions runners self-hosted in **Azure** or **Google Cloud Platform (GCP)**, authenticating passwordless via **Workload Identity Federation (WIF)** or native instance credentials.
 * **Isolated Cloud Run Execution**: Code remediation runs inside Google Cloud Run Jobs protected by **Direct VPC Egress** and **VPC Service Controls (VPC-SC)** perimeters.
 * **Configurable Inbound/Outbound Controls**:
   * Ingress restricted to Internal / Internal & Cloud Load Balancing.
@@ -36,9 +36,10 @@ This repository contains an enterprise reference implementation for integrating 
 │   └── fix_orchestrator.py          # Python orchestrator coordinating git clone, fix, test, and PR creation
 ├── terraform/
 │   ├── versions.tf                  # Provider requirements
-│   ├── variables.tf                 # Configurable variables (NAT, ILB, VPC-SC, WIF, Model)
+│   ├── variables.tf                 # Configurable variables (NAT, ILB, VPC-SC, WIF, GCP Runner, Model)
 │   ├── main.tf                      # Core resources (Cloud Run Job, Artifact Registry, APIs)
 │   ├── networking.tf                # VPC, Subnets, Direct VPC Egress, Cloud NAT, Internal Load Balancer
+│   ├── runner_vm.tf                 # Optional GCP Compute Engine self-hosted runner VM
 │   ├── iam.tf                       # WIF Pool/Provider, Service Accounts, and least-privilege IAM
 │   ├── secrets.tf                   # Secret Manager integration for GitHub tokens
 │   ├── vpc_sc.tf                    # VPC Service Controls Security Perimeter
@@ -53,7 +54,8 @@ This repository contains an enterprise reference implementation for integrating 
 │   └── README.md                    # PoC instructions
 ├── docs/
 │   ├── architecture.md              # Detailed architecture and security boundaries
-│   └── deployment_guide.md          # Step-by-step infrastructure and CI/CD deployment guide
+│   ├── deployment_guide.md          # Step-by-step infrastructure and CI/CD deployment guide
+│   └── gcp_self_hosted_runner.md    # Dedicated guide for GCP self-hosted runners
 └── README.md
 ```
 
@@ -88,4 +90,5 @@ docker push "${REPO_URI}"
 ## 📖 Documentation
 * [Architecture & Security Design](docs/architecture.md)
 * [Deployment & Setup Guide](docs/deployment_guide.md)
+* [GCP Self-Hosted Runner Setup Guide](docs/gcp_self_hosted_runner.md)
 * [PoC Application Guide](poc-app/README.md)

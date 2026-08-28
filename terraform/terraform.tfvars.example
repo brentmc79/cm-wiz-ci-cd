@@ -35,3 +35,12 @@ enable_vpc_sc                    = false
 # access_context_manager_policy_id = "123456789012"
 # create_access_policy            = false
 # org_id                          = "123456789012"
+
+# Optional GCP Self-Hosted GitHub Actions Runner VM (default: false)
+enable_gcp_runner                = false
+# runner_vm_machine_type         = "e2-standard-2"
+# runner_vm_zone                 = "us-central1-a"
+# runner_vm_disk_size_gb         = 50
+# github_repo_url                = "https://github.com/your-org/your-repo"
+# github_runner_registration_token = "AB1234567890" # From GitHub Settings > Actions > Runners > New runner
+# github_runner_labels           = "self-hosted,linux,x64,gcp-runner"

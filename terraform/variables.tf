@@ -162,3 +162,48 @@ variable "org_id" {
   type        = string
   default     = ""
 }
+
+# --- Optional GCP Self-Hosted GitHub Runner VM ---
+
+variable "enable_gcp_runner" {
+  description = "Whether to provision a dedicated private Google Compute Engine VM for self-hosting GitHub Actions runners in GCP"
+  type        = bool
+  default     = false
+}
+
+variable "runner_vm_machine_type" {
+  description = "Machine type for the GCP self-hosted runner VM"
+  type        = string
+  default     = "e2-standard-2"
+}
+
+variable "runner_vm_zone" {
+  description = "GCP Zone for the self-hosted runner VM"
+  type        = string
+  default     = "us-central1-a"
+}
+
+variable "runner_vm_disk_size_gb" {
+  description = "Boot disk size in GB for the runner VM"
+  type        = number
+  default     = 50
+}
+
+variable "github_repo_url" {
+  description = "Full URL of the GitHub repository or organization to register the runner against (e.g. https://github.com/my-org/my-repo)"
+  type        = string
+  default     = ""
+}
+
+variable "github_runner_registration_token" {
+  description = "Runner registration token obtained from GitHub repo/org settings (Settings > Actions > Runners > New runner)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "github_runner_labels" {
+  description = "Comma-separated extra labels to assign to the GitHub runner"
+  type        = string
+  default     = "self-hosted,linux,x64,gcp-runner"
+}

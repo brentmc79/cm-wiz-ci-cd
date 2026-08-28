@@ -47,3 +47,13 @@ output "ilb_ip_address" {
   description = "Internal Application Load Balancer IP address (if enabled)"
   value       = var.enable_internal_load_balancer ? google_compute_forwarding_rule.ilb_forwarding_rule[0].ip_address : "N/A (Disabled)"
 }
+
+output "gcp_runner_instance_name" {
+  description = "Name of the GCP self-hosted GitHub Actions runner VM (if enabled)"
+  value       = var.enable_gcp_runner ? google_compute_instance.gcp_github_runner[0].name : "N/A (Disabled)"
+}
+
+output "gcp_runner_private_ip" {
+  description = "Internal IP address of the GCP self-hosted GitHub runner VM"
+  value       = var.enable_gcp_runner ? google_compute_instance.gcp_github_runner[0].network_interface[0].network_ip : "N/A (Disabled)"
+}
