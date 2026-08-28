@@ -32,9 +32,8 @@ def search_user():
     username = request.args.get("username", "")
     cursor = db_conn.cursor()
 
-    # VULNERABILITY: Raw string concatenation in SQL query
-    query = f"SELECT id, username, email, role FROM users WHERE username = '{username}'"
-    cursor.execute(query)
+    # REMEDIATION: Using parameterized query to prevent SQL Injection
+    cursor.execute("SELECT id, username, email, role FROM users WHERE username = ?", (username,))
     
     results = cursor.fetchall()
     users = [{"id": r[0], "username": r[1], "email": r[2], "role": r[3]} for r in results]
@@ -42,3 +41,4 @@ def search_user():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+
