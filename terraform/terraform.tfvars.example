@@ -1,0 +1,37 @@
+# ==============================================================================
+# CodeMender CI/CD Infrastructure Configuration Example
+# ==============================================================================
+
+# Google Cloud Project ID
+project_id = "your-gcp-project-id"
+
+# GCP Region
+region = "us-central1"
+
+# GitHub Configuration for Workload Identity Federation (WIF)
+github_owner      = "your-github-org"     # e.g., "acme-corp"
+github_repository = "*"                   # e.g., "my-repo" or "*" for all repositories in org
+
+# Cloud Run Configuration
+cloud_run_job_name = "codemender-fix-runner"
+gemini_model       = "gemini-3.5-flash"
+job_cpu            = "2"
+job_memory         = "4Gi"
+
+# Networking Configuration
+network_name = "codemender-vpc"
+subnet_name  = "codemender-runner-subnet"
+subnet_cidr  = "10.10.0.0/24"
+
+# Set to true to create Cloud NAT for outbound internet access from Cloud Run (default: true)
+create_cloud_nat = true
+
+# Set to true to create Internal Load Balancer for Azure Interconnect/VPN private invocation (default: false)
+enable_internal_load_balancer = false
+# ilb_subnet_cidr             = "10.10.1.0/24"
+
+# VPC Service Controls Configuration (default: false)
+enable_vpc_sc                    = false
+# access_context_manager_policy_id = "123456789012"
+# create_access_policy            = false
+# org_id                          = "123456789012"

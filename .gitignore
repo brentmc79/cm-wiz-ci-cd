@@ -1,0 +1,128 @@
+# ==============================================================================
+# Git Ignore Configuration for CodeMender CI/CD Repository
+# ==============================================================================
+
+# --- Terraform & Infrastructure State ---
+# Local .terraform directories
+**/.terraform/*
+.terraform/
+.terraform.lock.hcl
+
+# Terraform State files (contains sensitive resource attributes)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform execution plan files
+tfplan
+*.tfplan
+*.tfplan.*
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Sensitive variable definitions containing API keys, project secrets, and tokens
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Allow example files to be checked in
+!terraform.tfvars.example
+!*.tfvars.example
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration files
+.terraformrc
+terraform.rc
+
+
+# --- Python & Test Cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Pytest & Test coverage
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+htmlcov/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+
+# --- Secrets & Environment Configuration ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.pkcs12
+
+
+# --- CI/CD Runner & CodeMender Local Artifacts ---
+.codemender/
+payload.json
+scratch/
+*.patch
+*.diff
+*.log
+
+
+# --- Operating System & Editor Files ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors & IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
