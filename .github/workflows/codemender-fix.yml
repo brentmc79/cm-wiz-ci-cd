@@ -42,6 +42,7 @@ jobs:
 
       - name: Authenticate to Google Cloud via Workload Identity Federation
         id: auth
+        if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -51,55 +52,23 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-
-      - name: Prepare Issue Context
-        id: prep
-        run: |
-          # Encode multiline issue body safely to pass to Cloud Run Job
-          ISSUE_TITLE="${{ github.event.issue.title }}"
-          ISSUE_BODY=$(cat << 'EOF'
-          ${{ github.event.issue.body }}
-          EOF
-          )
-          COMMENT_BODY=$(cat << 'EOF'
-          ${{ github.event.comment.body }}
-          EOF
-          )
-
-          # Save to JSON payload for Cloud Run execution overrides
-          python3 -c "
-          import json, os
-          data = {
-              'REPO_FULL_NAME': '${{ github.repository }}',
-              'ISSUE_NUMBER': '${{ github.event.issue.number }}',
-              'ISSUE_TITLE': os.environ.get('TITLE', ''),
-              'ISSUE_BODY': os.environ.get('BODY', ''),
-              'COMMENT_BODY': os.environ.get('COMMENT', ''),
-              'TARGET_BRANCH': '${{ github.event.repository.default_branch }}'
-          }
-          with open('payload.json', 'w') as f:
-              json.dump(data, f)
-          "
-        env:
-          TITLE: ${{ github.event.issue.title }}
-          BODY: ${{ github.event.issue.body }}
-          COMMENT: ${{ github.event.comment.body }}
+          project_id: ${{ vars.GCP_PROJECT_ID || 'att-wiz-cm-ci-cd' }}
 
       - name: Execute CodeMender Cloud Run Job
         id: run-job
         run: |
           JOB_NAME="${{ vars.GCP_CLOUD_RUN_JOB_NAME || 'codemender-fix-runner' }}"
           REGION="${{ vars.GCP_REGION || 'us-central1' }}"
+          PROJECT="${{ vars.GCP_PROJECT_ID || 'att-wiz-cm-ci-cd' }}"
 
-          echo "Initiating Cloud Run Job: ${JOB_NAME} in ${REGION}"
+          echo "Initiating Cloud Run Job: ${JOB_NAME} in region ${REGION} (Project: ${PROJECT})"
 
           # Trigger the Cloud Run Job with issue metadata overrides
           gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT}" \
             --region="${REGION}" \
             --wait \
-            --update-env-vars="REPO_FULL_NAME=${{ github.repository }},ISSUE_NUMBER=${{ github.event.issue.number }},TARGET_BRANCH=${{ github.event.repository.default_branch }}" \
-            --set-env-vars="ISSUE_TITLE=$(cat payload.json | jq -r .ISSUE_TITLE),ISSUE_BODY=$(cat payload.json | jq -r .ISSUE_BODY),COMMENT_BODY=$(cat payload.json | jq -r .COMMENT_BODY)"
+            --update-env-vars="REPO_FULL_NAME=${{ github.repository }},ISSUE_NUMBER=${{ github.event.issue.number }},TARGET_BRANCH=${{ github.event.repository.default_branch }}"
 
       - name: Report Failure on Error
         if: failure()

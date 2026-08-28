@@ -301,6 +301,17 @@ def main():
         log("ERROR: REPO_FULL_NAME and ISSUE_NUMBER are required.")
         sys.exit(1)
 
+    global ISSUE_TITLE, ISSUE_BODY
+    if not ISSUE_TITLE or not ISSUE_BODY:
+        log(f"Fetching issue #{ISSUE_NUMBER} details from GitHub API...")
+        try:
+            issue_data = github_api_request(f"repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}")
+            ISSUE_TITLE = ISSUE_TITLE or issue_data.get("title", "")
+            ISSUE_BODY = ISSUE_BODY or issue_data.get("body", "")
+            log(f"Fetched Issue Title: {ISSUE_TITLE}")
+        except Exception as e:
+            log(f"Warning: Could not fetch issue details from GitHub API: {e}")
+
     # 1. Parse Wiz Finding
     finding = parse_wiz_finding(ISSUE_TITLE, ISSUE_BODY)
     log(f"Parsed Finding: {finding['vulnerability_type']} in {finding['file_path']}")
