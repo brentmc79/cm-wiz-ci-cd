@@ -177,8 +177,7 @@ def apply_codemender_fix(workspace_dir: str, finding: Dict[str, Any]) -> bool:
 
     if not full_target_path:
         for root, dirs, files in os.walk(workspace_dir):
-            dirs[:] = [d for d in dirs if d not in [".git", ".github", "docker", "venv", ".venv", "__pycache__", "terraform", "docs"]]:
-                continue
+            dirs[:] = [d for d in dirs if d not in [".git", ".github", "docker", "venv", ".venv", "__pycache__", "terraform", "docs"]]
             for f in files:
                 if f.endswith((".py", ".js", ".ts", ".go", ".java")):
                     full_target_path = os.path.join(root, f)
